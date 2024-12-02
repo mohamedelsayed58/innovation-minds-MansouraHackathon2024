@@ -1,0 +1,119 @@
+#include <Wire.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_ILI9341.h>
+#include <Adafruit_TouchScreen.h>
+#include <SoftwareSerial.h>
+
+// إعدادات الشاشة
+#define TFT_CS     10
+#define TFT_RST    9
+#define TFT_DC     8
+#define TOUCH_CS   7
+
+Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
+Adafruit_TouchScreen ts = Adafruit_TouchScreen(6, 5, 4, 3, 300);  // أرقام المنافذ لمستشعر اللمس (X, Y, Z, T)
+
+// إعداد البلوتوث
+SoftwareSerial bluetooth(11, 12); // (RX, TX)
+
+// إعداد حساس درجة الحرارة
+OneWire oneWire(2);  // منفذ حساس الحرارة
+DallasTemperature sensors(&oneWire);
+
+// الحساسات والمضخات
+int pH_sensor = A0;
+int EC_sensor = A1;
+int TDS_sensor = A2;
+int heater = 10;
+int cooler = 11;
+
+float pH_value, EC_value, TDS_value, water_temperature;
+const float temperature_target = 25.0; // درجة الحرارة المستهدفة (°C)
+const float temperature_tolerance = 1.0; // هامش السماح (°C)
+
+void setup() {
+  // إعداد الاتصال التسلسلي
+  Serial.begin(9600);
+  bluetooth.begin(9600); // إعداد البلوتوث
+
+  // إعداد الشاشة
+  tft.begin();
+  tft.setRotation(3);
+  tft.fillScreen(ILI9341_WHITE);
+  tft.setTextColor(ILI9341_BLACK);
+  tft.setTextSize(2);
+
+  // بدء اتصال بحساس الحرارة
+  sensors.begin();
+
+  // إعداد المخارج
+  pinMode(heater, OUTPUT);
+  pinMode(cooler, OUTPUT);
+
+  // رسالة ترحيب عند تشغيل البلوتوث
+  bluetooth.println("Bluetooth Connected: Ready to send data.");
+}
+
+void loop() {
+  // قراءة القيم من الحساسات
+  pH_value = analogRead(pH_sensor) * (14.0 / 1023.0); // تحويل القيم إلى pH
+  EC_value = analogRead(EC_sensor) * (5.0 / 1023.0);  // تحويل القيم إلى EC
+  TDS_value = readTDS();  // قراءة TDS
+  water_temperature = readTemperature();  // قراءة درجة الحرارة
+
+  // إرسال البيانات عبر البلوتوث
+  bluetooth.print("pH: "); bluetooth.println(pH_value);
+  bluetooth.print("EC: "); bluetooth.println(EC_value);
+  bluetooth.print("TDS: "); bluetooth.println(TDS_value);
+  bluetooth.print("Temperature: "); bluetooth.println(water_temperature);
+
+  // طباعة القيم إلى شاشة اللمس
+  tft.fillRect(0, 0, 320, 240, ILI9341_WHITE);  // مسح الشاشة
+  tft.setCursor(10, 10);
+  tft.print("pH: ");
+  tft.println(pH_value);
+  tft.setCursor(10, 40);
+  tft.print("EC: ");
+  tft.println(EC_value);
+  tft.setCursor(10, 70);
+  tft.print("TDS: ");
+  tft.println(TDS_value);
+  tft.setCursor(10, 100);
+  tft.print("Temp: ");
+  tft.println(water_temperature);
+
+  // ضبط درجة الحرارة
+  adjustTemperature();
+
+  delay(1000); // تأخير لثانية
+}
+
+// وظيفة قراءة TDS
+float readTDS() {
+  int sensorValue = analogRead(TDS_sensor);
+  float voltage = sensorValue * (5.0 / 1023.0);
+  float tds = (133.42 * voltage * voltage * voltage - 255.86 * voltage * voltage + 857.39 * voltage) * 0.5;
+  return tds;
+}
+
+// وظيفة قراءة درجة الحرارة
+float readTemperature() {
+  sensors.requestTemperatures();
+  return sensors.getTempCByIndex(0);
+}
+
+// وظيفة لضبط درجة الحرارة
+void adjustTemperature() {
+  if (water_temperature < temperature_target - temperature_tolerance) {
+    digitalWrite(heater, HIGH); // تشغيل السخان
+    digitalWrite(cooler, LOW);  // إيقاف المبرد
+  } else if (water_temperature > temperature_target + temperature_tolerance) {
+    digitalWrite(heater, LOW);  // إيقاف السخان
+    digitalWrite(cooler, HIGH); // تشغيل المبرد
+  } else {
+    digitalWrite(heater, LOW);  // إيقاف السخان
+    digitalWrite(cooler, LOW);  // إيقاف المبرد
+  }
+}
